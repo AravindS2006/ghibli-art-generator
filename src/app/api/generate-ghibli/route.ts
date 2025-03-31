@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     // Test the API key first
     try {
       await client.textToImage({
-        model: 'nitrosocke/Ghibli-Diffusion',
+        model: 'alvarobartt/ghibli-characters-flux-lora',
         inputs: 'test',
         parameters: {
           num_inference_steps: 1,
@@ -42,12 +42,11 @@ export async function POST(request: Request) {
     }
 
     const image = await client.textToImage({
-      model: 'nitrosocke/Ghibli-Diffusion',
+      model: 'alvarobartt/ghibli-characters-flux-lora',
       inputs: prompt,
       parameters: {
         num_inference_steps: parseInt(process.env.NEXT_PUBLIC_NUM_INFERENCE_STEPS || '30'),
         guidance_scale: 7.5,
-        negative_prompt: "ugly, blurry, low quality, distorted, deformed, realistic, photograph",
       },
     })
 
