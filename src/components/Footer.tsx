@@ -101,14 +101,14 @@ export default function Footer() {
           <p className="text-gray-400 mt-2">
             Powered by{' '}
             <a
-              href="https://huggingface.co/nitrosocke/Ghibli-Diffusion"
+              href="https://huggingface.co/alvarobartt/ghibli-characters-flux-lora"
               target="_blank"
               rel="noopener noreferrer"
               className="text-white hover:text-purple-400 transition-colors"
             >
-              Ghibli-Diffusion
+              Ghibli Characters Flux LoRA
             </a>{' '}
-            by nitrosocke
+            by alvarobartt
           </p>
         </div>
       </div>

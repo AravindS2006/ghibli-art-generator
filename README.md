@@ -80,7 +80,7 @@ Transform your imagination into Studio Ghibli-style artwork using AI ✨
 | Frontend | Backend | AI/ML | UI/UX |
 |:--------:|:-------:|:-----:|:-----:|
 | Next.js 14 | Node.js | Hugging Face API | Next UI |
-| TypeScript | Express | Ghibli-Diffusion | Material UI |
+| TypeScript | Express | Ghibli Characters Flux LoRA | Material UI |
 | React Three Fiber | Three.js | Stable Diffusion | Tailwind CSS |
 
 </div>
@@ -94,7 +94,7 @@ Transform your imagination into Studio Ghibli-style artwork using AI ✨
   - [Tailwind CSS](https://tailwindcss.com/)
 - **3D Graphics:** [Three.js](https://threejs.org/) with [React Three Fiber](https://github.com/pmndrs/react-three-fiber)
 - **State Management:** [Zustand](https://github.com/pmndrs/zustand)
-- **Image Generation:** [Hugging Face API](https://huggingface.co/) with [Ghibli-Diffusion](https://huggingface.co/nitrosocke/Ghibli-Diffusion) model by nitrosocke
+- **Image Generation:** [Hugging Face API](https://huggingface.co/) with [Ghibli Characters Flux LoRA](https://huggingface.co/alvarobartt/ghibli-characters-flux-lora) by alvarobartt
 - **Image Upload:** [React Dropzone](https://react-dropzone.js.org/)
 - **TypeScript:** For type safety
 
