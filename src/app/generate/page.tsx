@@ -158,11 +158,16 @@ export default function GeneratePage() {
                     </Button>
                   </div>
                 ) : (
-                  <p className="text-gray-400">
-                    {isDragActive
-                      ? 'Drop the image here'
-                      : 'Drag & drop an image here, or click to select'}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="text-gray-400">
+                      {isDragActive
+                        ? 'Drop the image here'
+                        : 'Drag & drop an image here, or click to select'}
+                    </p>
+                    <p className="text-sm text-yellow-500">
+                      ⚠️ Reference image feature is currently under testing and will be enabled soon
+                    </p>
+                  </div>
                 )}
               </div>
 

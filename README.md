@@ -21,7 +21,7 @@ Transform your imagination into Studio Ghibli-style artwork using AI ✨
 
 | 🎨 Text-to-Art | 📸 Image Reference | 🌟 Animated Background | 🎯 Modern UI |
 |:-------------:|:-----------------:|:-------------------:|:-----------:|
-| Generate Ghibli-style artwork from text descriptions | Upload reference images for visual context | Beautiful Three.js animated background | Sleek interface with Next UI & Material UI |
+| Generate Ghibli-style artwork from text descriptions | Upload reference images for visual context (Under Testing) | Beautiful Three.js animated background | Sleek interface with Next UI & Material UI |
 
 </div>
 
