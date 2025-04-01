@@ -65,8 +65,8 @@ export default function GeneratePage() {
   })
 
   const handleGenerate = async () => {
-    if (!prompt) {
-      setError('Please enter a prompt')
+    if (!prompt && !uploadedImage) {
+      setError('Please enter a prompt or upload an image')
       return
     }
 
@@ -79,7 +79,10 @@ export default function GeneratePage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ 
+          prompt,
+          imageUrl: uploadedImage // Send the base64 image directly
+        }),
       })
 
       if (!response.ok) {
@@ -165,7 +168,7 @@ export default function GeneratePage() {
                         : 'Drag & drop an image here, or click to select'}
                     </p>
                     <p className="text-sm text-yellow-500">
-                      ⚠️ Reference image feature is currently under testing and will be enabled soon
+                      ⚠️ Reference image feature is currently under testing so it may not work as expected. use at your own risk.
                     </p>
                   </div>
                 )}
