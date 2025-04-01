@@ -13,11 +13,15 @@ interface AppState {
   generatedImage: string | null
   isLoading: boolean
   error: string | null
+  warning: string | null
+  retryAfter: number | null
   setPrompt: (prompt: string) => void
   setUploadedImage: (image: string | null) => void
   setGeneratedImage: (image: string | null) => void
   setIsLoading: (loading: boolean) => void
   setError: (error: string | null) => void
+  setWarning: (warning: string | null) => void
+  setRetryAfter: (retryAfter: number | null) => void
 }
 
 const useStore = create<AppState>((set) => ({
@@ -26,11 +30,15 @@ const useStore = create<AppState>((set) => ({
   generatedImage: null,
   isLoading: false,
   error: null,
+  warning: null,
+  retryAfter: null,
   setPrompt: (prompt) => set({ prompt }),
   setUploadedImage: (image) => set({ uploadedImage: image }),
   setGeneratedImage: (image) => set({ generatedImage: image }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
+  setWarning: (warning) => set({ warning }),
+  setRetryAfter: (retryAfter) => set({ retryAfter }),
 }))
 
 export default function GeneratePage() {
@@ -40,11 +48,15 @@ export default function GeneratePage() {
     generatedImage,
     isLoading,
     error,
+    warning,
+    retryAfter,
     setPrompt,
     setUploadedImage,
     setGeneratedImage,
     setIsLoading,
     setError,
+    setWarning,
+    setRetryAfter,
   } = useStore()
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -72,6 +84,8 @@ export default function GeneratePage() {
 
     setIsLoading(true)
     setError(null)
+    setWarning(null)
+    setRetryAfter(null)
 
     try {
       const response = await fetch('/api/generate-ghibli', {
@@ -81,21 +95,36 @@ export default function GeneratePage() {
         },
         body: JSON.stringify({ 
           prompt,
-          imageUrl: uploadedImage // Send the base64 image directly
+          imageUrl: uploadedImage
         }),
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        throw new Error('Failed to generate image')
+        throw new Error(data.details || data.error || 'Failed to generate image')
       }
 
-      const data = await response.json()
       setGeneratedImage(data.image)
+      setWarning(data.warning)
+      setRetryAfter(data.retryAfter || null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
+      setGeneratedImage(null)
+      setRetryAfter(null)
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Format retry time
+  const formatRetryTime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    if (hours > 0) {
+      return `${hours} hour${hours > 1 ? 's' : ''}`
+    }
+    return `${minutes} minute${minutes > 1 ? 's' : ''}`
   }
 
   return (
@@ -181,18 +210,33 @@ export default function GeneratePage() {
                 className="w-full"
                 onClick={handleGenerate}
                 isLoading={isLoading}
-                disabled={isLoading || !prompt}
+                disabled={isLoading || (!prompt && !uploadedImage)}
               >
                 Create Ghibli Magic ✨
               </Button>
+
+              {warning && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-yellow-500 text-center"
+                >
+                  {warning}
+                </motion.div>
+              )}
 
               {error && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="text-red-500 text-center"
+                  className="text-red-500 text-center space-y-2"
                 >
-                  {error}
+                  <p>{error}</p>
+                  {retryAfter && (
+                    <p className="text-sm">
+                      Please try again in {formatRetryTime(retryAfter)}
+                    </p>
+                  )}
                 </motion.div>
               )}
             </CardBody>
