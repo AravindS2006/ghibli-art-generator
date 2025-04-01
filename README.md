@@ -95,6 +95,7 @@ Transform your imagination into Studio Ghibli-style artwork using AI ✨
 - **3D Graphics:** [Three.js](https://threejs.org/) with [React Three Fiber](https://github.com/pmndrs/react-three-fiber)
 - **State Management:** [Zustand](https://github.com/pmndrs/zustand)
 - **Image Generation:** [Hugging Face API](https://huggingface.co/) with [Ghibli Characters Flux LoRA](https://huggingface.co/alvarobartt/ghibli-characters-flux-lora) by alvarobartt
+- **Image Description:** [Google Gemma 3](https://huggingface.co/google/gemma-3-27b-it) by Google DeepMind
 - **Image Upload:** [React Dropzone](https://react-dropzone.js.org/)
 - **TypeScript:** For type safety
 
@@ -115,7 +116,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - [Studio Ghibli](https://www.ghibli.jp/) for their magical artwork
-- [nitrosocke](https://huggingface.co/nitrosocke) for the [Ghibli-Diffusion](https://huggingface.co/nitrosocke/Ghibli-Diffusion) model
+- [alvarobartt](https://huggingface.co/alvarobartt) for the [Ghibli Characters Flux LoRA](https://huggingface.co/alvarobartt/ghibli-characters-flux-lora) model
+- [Google DeepMind](https://deepmind.google/) for the [Gemma 3](https://huggingface.co/google/gemma-3-27b-it) model
 - All contributors and supporters of this project
 
 ---

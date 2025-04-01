@@ -108,7 +108,16 @@ export default function Footer() {
             >
               Ghibli Characters Flux LoRA
             </a>{' '}
-            by alvarobartt
+            by alvarobartt and{' '}
+            <a
+              href="https://huggingface.co/google/gemma-3-27b-it"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-white hover:text-purple-400 transition-colors"
+            >
+              Google Gemma 3
+            </a>{' '}
+            by Google DeepMind
           </p>
         </div>
       </div>
