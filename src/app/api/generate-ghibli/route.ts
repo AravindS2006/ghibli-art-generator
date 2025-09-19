@@ -18,6 +18,51 @@ const isCreditLimitError = (error: any) => {
          error.message?.includes('quota exceeded')
 }
 
+async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
+  const endpoint = `https://api-inference.huggingface.co/models/${model}`
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+      'Content-Type': 'application/json',
+      'Accept': 'image/png',
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: {
+        ...parameters,
+        // Enable cache and wait for model warmup to reduce flaky errors
+        use_cache: true,
+        // Some endpoints accept this top-level option as well
+      },
+      options: {
+        wait_for_model: true,
+        use_cache: true,
+      },
+    }),
+  })
+
+  if (!res.ok) {
+    let details: any = undefined
+    try {
+      details = await res.json()
+    } catch {
+      try {
+        details = await res.text()
+      } catch {}
+    }
+    const err: any = new Error(typeof details === 'string' ? details : (details?.error || `HF request failed: ${res.status}`))
+    err.status = res.status
+    err.response = { data: details }
+    throw err
+  }
+
+  const arrayBuffer = await res.arrayBuffer()
+  const base64 = Buffer.from(arrayBuffer).toString('base64')
+  const dataUrl = `data:image/png;base64,${base64}`
+  return dataUrl
+}
+
 export async function POST(request: Request) {
   try {
     const { prompt, imageUrl } = await request.json()
@@ -91,22 +136,17 @@ export async function POST(request: Request) {
       }
     }
 
-    // Generate the Ghibli-style image with optimized parameters
+    // Generate the Ghibli-style image (direct API call to avoid Blob fetch issues)
     try {
       console.log('Generating image with prompt:', finalPrompt)
-      const image = await client.textToImage({
-        model: "strangerzonehf/Flux-Ghibli-Art-LoRA",
-        inputs: finalPrompt,
-        parameters: {
+      const dataUrl = await generateImageViaHF(
+        "strangerzonehf/Flux-Ghibli-Art-LoRA",
+        finalPrompt,
+        {
           num_inference_steps: parseInt(process.env.NEXT_PUBLIC_NUM_INFERENCE_STEPS || '20'),
           guidance_scale: 7.5,
-        },
-      })
-
-      // Convert the Blob to base64
-      const arrayBuffer = await image.arrayBuffer()
-      const base64 = Buffer.from(arrayBuffer).toString('base64')
-      const dataUrl = `data:image/png;base64,${base64}`
+        }
+      )
 
       return NextResponse.json({ 
         image: dataUrl,
