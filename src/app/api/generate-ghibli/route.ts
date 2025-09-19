@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { HfInference } from '@huggingface/inference'
+
 export const runtime = 'nodejs'
 export const maxDuration = 120
 
