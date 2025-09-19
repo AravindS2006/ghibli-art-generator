@@ -32,53 +32,61 @@ export async function POST(request: Request) {
     console.log('Processing request with:', { prompt, hasImage: !!imageUrl })
 
     let finalPrompt = prompt
-    let imageDescriptionWarning = null
+    let imageDescriptionWarning: string | null = null
 
     // If image is provided, get its description using image-to-text model
     if (imageUrl) {
-      try {
-        const imageDescription = await client.chatCompletion({
-          model: "google/gemma-3-27b-it",
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Describe this image in detail, focusing on the visual elements, composition, and mood.",
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: imageUrl,
-                  },
-                },
-              ],
-            },
-          ],
-          max_tokens: 200, // Reduced from 500 to save credits
-        })
+      const isPublicHttpUrl = /^https?:\/\//i.test(imageUrl)
 
-        console.log('Image description:', imageDescription.choices[0].message)
-        
-        // Combine the image description with the prompt if provided
-        finalPrompt = prompt 
-          ? `${prompt} ${imageDescription.choices[0].message.content}`
-          : imageDescription.choices[0].message.content
-      } catch (error: any) {
-        console.error('Error getting image description:', {
-          message: error.message,
-          status: error.status,
-          response: error.response?.data
-        })
-        
-        // If image description fails due to credit limit, set warning and continue with original prompt
-        if (isCreditLimitError(error)) {
-          imageDescriptionWarning = 'Image description feature is currently unavailable due to API limits. Proceeding with text prompt only.'
-          finalPrompt = prompt || 'A Ghibli-style scene'
-        } else {
-          // For other errors, continue with original prompt
-          finalPrompt = prompt || 'A Ghibli-style scene'
+      if (!isPublicHttpUrl) {
+        // On Vercel, Gemma requires a publicly accessible HTTPS URL, not data:/blob:
+        imageDescriptionWarning = 'Reference image must be a public URL. Proceeding with text prompt only.'
+        finalPrompt = prompt || 'A Ghibli-style scene'
+      } else {
+        try {
+          const imageDescription = await client.chatCompletion({
+            model: "google/gemma-3-27b-it",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: "Describe this image in detail, focusing on the visual elements, composition, and mood.",
+                  },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: imageUrl,
+                    },
+                  },
+                ],
+              },
+            ],
+            max_tokens: 200,
+          })
+
+          console.log('Image description:', imageDescription.choices[0].message)
+          
+          // Combine the image description with the prompt if provided
+          finalPrompt = prompt 
+            ? `${prompt} ${imageDescription.choices[0].message.content}`
+            : imageDescription.choices[0].message.content
+        } catch (error: any) {
+          console.error('Error getting image description:', {
+            message: error.message,
+            status: error.status,
+            response: error.response?.data
+          })
+          
+          // If image description fails due to credit limit, set warning and continue with original prompt
+          if (isCreditLimitError(error)) {
+            imageDescriptionWarning = 'Image description feature is currently unavailable due to API limits. Proceeding with text prompt only.'
+            finalPrompt = prompt || 'A Ghibli-style scene'
+          } else {
+            // For other errors, continue with original prompt
+            finalPrompt = prompt || 'A Ghibli-style scene'
+          }
         }
       }
     }
@@ -90,7 +98,7 @@ export async function POST(request: Request) {
         model: "strangerzonehf/Flux-Ghibli-Art-LoRA",
         inputs: finalPrompt,
         parameters: {
-          num_inference_steps: parseInt(process.env.NEXT_PUBLIC_NUM_INFERENCE_STEPS || '20'), // Reduced from 30 to save credits
+          num_inference_steps: parseInt(process.env.NEXT_PUBLIC_NUM_INFERENCE_STEPS || '20'),
           guidance_scale: 7.5,
         },
       })
