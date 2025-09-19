@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { HfInference } from '@huggingface/inference'
+export const runtime = 'nodejs'
+export const maxDuration = 120
 
 if (!process.env.HUGGINGFACE_API_KEY) {
   throw new Error('Missing HUGGINGFACE_API_KEY environment variable')
