@@ -22,14 +22,52 @@ const isCreditLimitError = (error: any) => {
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
-  // Try multiple endpoints: prefer router API, then model-specific endpoints as fallback
+  // Note: SDK-first attempt removed due to package export/typing differences.
+  // We will use the router fetch fallback below.
+
+  // Fallback: use router fetch endpoints
   const encodedModel = encodeURIComponent(model)
   const candidateEndpoints = [
-    // Preferred: router text-to-image endpoint (accepts `model` in body)
     { url: `https://router.huggingface.co/api/text-to-image`, bodyIsModelField: true },
-    // Alternative router model-specific endpoint (URL-encoded)
     { url: `https://router.huggingface.co/models/${encodedModel}`, bodyIsModelField: false },
   ]
+
+  // If the repo/user provides a custom inference endpoint (e.g. a composed HF Inference Endpoint
+  // that applies the LoRA adapter to a base model), try it first. This is useful because
+  // LoRA adapters are not callable directly via the router; a composed endpoint is required.
+  const customEndpoint = process.env.CUSTOM_INFERENCE_ENDPOINT || process.env.HF_CUSTOM_INFERENCE_ENDPOINT
+  const customApiKey = process.env.CUSTOM_INFERENCE_API_KEY || process.env.HF_CUSTOM_INFERENCE_API_KEY
+
+  if (customEndpoint) {
+    try {
+      const payload = { inputs: prompt, parameters: { ...parameters, use_cache: true } }
+      const res = await fetch(customEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(customApiKey ? { 'Authorization': `Bearer ${customApiKey}` } : {}),
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (res.ok) {
+        const ct = res.headers.get('content-type') || ''
+        if (ct.includes('application/json')) {
+          const data = await res.json()
+          if (data.image) return typeof data.image === 'string' && data.image.startsWith('data:') ? data.image : `data:image/png;base64,${data.image}`
+        } else {
+          const ab = await res.arrayBuffer()
+          if (ab.byteLength > 0) return `data:image/png;base64,${Buffer.from(ab).toString('base64')}`
+        }
+      } else {
+        const details = await res.text().catch(() => '')
+        console.warn('Custom inference endpoint failed:', res.status, details)
+      }
+    } catch (e: any) {
+      console.warn('Error calling custom inference endpoint:', e?.message || e)
+    }
+    // If custom endpoint fails, continue to router fallbacks below
+  }
 
   let lastError: any = null
 
@@ -55,14 +93,12 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
         const err: any = new Error(`HF request failed (${res.status}) ${details ? '- ' + details : ''}`)
         err.status = res.status
         err.response = { data: details, endpoint: ep.url }
-        // If 404, provide specific guidance
         if (res.status === 404) {
           err.hint = `Model not found or inaccessible at ${ep.url}. Ensure the model ID is correct and the model is available for inference (LoRA adapters may not be callable directly).`
         }
         throw err
       }
 
-      // Some router endpoints return JSON with an `image` base64 field
       const contentType = res.headers.get('content-type') || ''
       if (contentType.includes('application/json')) {
         const data = await res.json()
@@ -72,7 +108,6 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
           const base64 = typeof img === 'string' ? img : Buffer.from(img).toString('base64')
           return `data:image/png;base64,${base64}`
         }
-        // if JSON response doesn't include image, but includes binary array, try to handle
         if (data && data.error) {
           const err: any = new Error(data.error || JSON.stringify(data))
           err.response = { data }
@@ -80,7 +115,6 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
         }
       }
 
-      // fallback: handle binary response
       const arrayBuffer = await res.arrayBuffer()
       if (arrayBuffer.byteLength === 0) {
         throw new Error('Empty response from image generation API')
@@ -90,12 +124,10 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
     } catch (err: any) {
       lastError = err
       console.warn(`HF endpoint ${ep.url} failed:`, err?.message || err)
-      // try next endpoint
       continue
     }
   }
 
-  // All endpoints failed
   console.error('All HF endpoints failed:', lastError)
   throw lastError
 }
@@ -230,6 +262,31 @@ export async function POST(request: Request) {
         const hint = error.hint || (isLikelyLoRA
           ? 'The requested model looks like a LoRA adapter which is not a standalone inference model. LoRA adapters cannot be called directly via the HF router. Use a base text-to-image model or deploy a custom endpoint that composes the adapter with a base model.'
           : 'Model not found at Hugging Face router endpoint. Verify the model ID and that it is available for hosted inference.')
+
+        // If this looks like a LoRA adapter, attempt a public fallback model (if available)
+        if (isLikelyLoRA) {
+          const fallbackModel = process.env.NEXT_PUBLIC_FALLBACK_MODEL || 'stabilityai/stable-diffusion-2'
+          console.log(`Original model appears to be a LoRA adapter. Attempting fallback model: ${fallbackModel}`)
+          try {
+            const fallbackDataUrl = await generateImageViaHF(
+              fallbackModel,
+              finalPrompt,
+              {
+                num_inference_steps: parseInt(process.env.NEXT_PUBLIC_NUM_INFERENCE_STEPS || '20'),
+                guidance_scale: 7.5,
+              }
+            )
+
+            return NextResponse.json({
+              image: fallbackDataUrl,
+              description: finalPrompt,
+              warning: `Requested model unavailable; used fallback model ${fallbackModel}`,
+            })
+          } catch (fallbackError: any) {
+            console.error('Fallback model also failed:', fallbackError?.message || fallbackError)
+            // Fall through to return the original 404 response with hints
+          }
+        }
 
         return NextResponse.json(
           {

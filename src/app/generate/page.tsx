@@ -106,15 +106,47 @@ export default function GeneratePage() {
         }),
       })
 
-      const data = await response.json()
+        // Safely handle JSON and non-JSON (HTML) responses to avoid 'Unexpected token <' errors
+        const contentType = response.headers.get('content-type') || ''
+        let data: any = null
+        let rawText: string | null = null
 
-      if (!response.ok) {
-        throw new Error(data.details || data.error || 'Failed to generate image')
-      }
+        if (contentType.includes('application/json')) {
+          data = await response.json()
+        } else {
+          rawText = await response.text()
+          try {
+            data = JSON.parse(rawText)
+          } catch (e) {
+            // If server returned HTML/error page, throw a meaningful error
+            throw new Error(`Server returned non-JSON response: ${rawText.slice(0,200)}`)
+          }
+        }
 
-      setGeneratedImage(data.image)
-      setWarning(data.warning)
-      setRetryAfter(data.retryAfter || null)
+        if (!response.ok) {
+          // If model is not found on HF router, show a friendly placeholder image
+          const isModelNotFound = response.status === 404 || /model not found/i.test(data?.error || data?.details || '')
+          if (isModelNotFound) {
+            const placeholderSvg = encodeURIComponent(`
+              <svg xmlns='http://www.w3.org/2000/svg' width='1024' height='1024' viewBox='0 0 1024 1024'>
+                <rect width='100%' height='100%' fill='#0f172a' />
+                <text x='50%' y='45%' fill='#a78bfa' font-size='48' font-family='Arial' text-anchor='middle'>Model unavailable</text>
+                <text x='50%' y='55%' fill='#fef3c7' font-size='28' font-family='Arial' text-anchor='middle'>Showing placeholder image</text>
+              </svg>
+            `)
+            const placeholderDataUrl = `data:image/svg+xml;utf8,${placeholderSvg}`
+            setGeneratedImage(placeholderDataUrl)
+            setWarning(data?.hint || 'Selected model is not available for hosted inference. Try a different model or use a hosted endpoint.')
+            setError(null)
+            return
+          }
+
+          throw new Error(data?.details || data?.error || 'Failed to generate image')
+        }
+
+        setGeneratedImage(data.image)
+        setWarning(data.warning)
+        setRetryAfter(data.retryAfter || null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
       setGeneratedImage(null)
