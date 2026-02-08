@@ -2,9 +2,10 @@
 
 import { motion } from 'framer-motion'
 import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Stars, Float, Text3D } from '@react-three/drei'
+import { OrbitControls, Stars, Float, Text3D, Preload } from '@react-three/drei'
 import { Button } from '@nextui-org/react'
 import Link from 'next/link'
+import { Suspense, useState, useEffect } from 'react'
 
 function FloatingText() {
   return (
@@ -34,22 +35,63 @@ function FloatingText() {
 
 function BackgroundScene() {
   return (
-    <Canvas camera={{ position: [0, 0, 5] }}>
+    <Canvas 
+      camera={{ position: [0, 0, 5] }}
+      gl={{ antialias: true, alpha: true }}
+      onCreated={(state) => {
+        state.gl.setClearColor(0x000000, 0)
+      }}
+    >
       <ambientLight intensity={0.5} />
       <pointLight position={[10, 10, 10]} />
       <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-      <OrbitControls enableZoom={false} enablePan={false} />
+      <OrbitControls enableZoom={false} enablePan={false} autoRotate autoRotateSpeed={3} />
       <FloatingText />
+      <Preload all />
     </Canvas>
   )
 }
 
+function ErrorBoundaryCanvas({ onError }: { onError: () => void }) {
+  useEffect(() => {
+    const handleContextLoss = () => {
+      console.error('WebGL context lost')
+      onError()
+    }
+
+    const canvas = document.querySelector('canvas')
+    canvas?.addEventListener('webglcontextlost', handleContextLoss)
+
+    return () => {
+      canvas?.removeEventListener('webglcontextlost', handleContextLoss)
+    }
+  }, [onError])
+
+  try {
+    return <BackgroundScene />
+  } catch (error) {
+    console.error('Three.js Canvas error:', error)
+    onError()
+    return null
+  }
+}
+
 export default function Hero() {
+  const [canvasError, setCanvasError] = useState(false)
+
   return (
-    <div className="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-black">
       {/* 3D Background */}
       <div className="absolute inset-0 -z-10">
-        <BackgroundScene />
+        {!canvasError ? (
+          <Suspense fallback={
+            <div className="absolute inset-0 bg-gradient-to-b from-purple-600 to-black" />
+          }>
+            <ErrorBoundaryCanvas onError={() => setCanvasError(true)} />
+          </Suspense>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-b from-purple-600/50 to-black" />
+        )}
       </div>
 
       {/* Content */}

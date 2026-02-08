@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Button, Input, Card, CardBody, Image } from '@nextui-org/react'
 import { useDropzone } from 'react-dropzone'
@@ -42,6 +42,8 @@ const useStore = create<AppState>((set) => ({
 }))
 
 export default function GeneratePage() {
+  const [mounted, setMounted] = useState(false)
+  
   const {
     prompt,
     uploadedImage,
@@ -58,6 +60,11 @@ export default function GeneratePage() {
     setWarning,
     setRetryAfter,
   } = useStore()
+
+  // Ensure client-side only rendering to avoid hydration issues
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -129,7 +136,13 @@ export default function GeneratePage() {
 
   return (
     <div className="min-h-screen py-20">
-      <div className="container mx-auto px-4">
+      {!mounted ? (
+        <div className="container mx-auto px-4">
+          <div className="max-w-4xl mx-auto h-96 bg-white/5 rounded-lg animate-pulse" />
+        </div>
+      ) : (
+        <>
+          <div className="container mx-auto px-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -293,6 +306,8 @@ export default function GeneratePage() {
           )}
         </div>
       </div>
+    </div>
+      )}
     </div>
   )
 } 

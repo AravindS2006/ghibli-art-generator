@@ -12,60 +12,86 @@ const client = new HfInference(process.env.HUGGINGFACE_API_KEY)
 
 // Helper function to check if error is due to credit limit
 const isCreditLimitError = (error: any) => {
-  return error.message?.includes('monthly included credits') || 
+  const errorMsg = (error.message || '').toLowerCase()
+  return errorMsg.includes('monthly included credits') || 
          error.status === 429 ||
-         error.message?.includes('rate limit') ||
-         error.message?.includes('quota exceeded')
+         errorMsg.includes('rate limit') ||
+         errorMsg.includes('quota exceeded') ||
+         errorMsg.includes('insufficient credit') ||
+         errorMsg.includes('model is overloaded')
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
   const endpoint = `https://api-inference.huggingface.co/models/${model}`
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-      'Content-Type': 'application/json',
-      'Accept': 'image/png',
-    },
-    body: JSON.stringify({
-      inputs: prompt,
-      parameters: {
-        ...parameters,
-        // Enable cache and wait for model warmup to reduce flaky errors
-        use_cache: true,
-        // Some endpoints accept this top-level option as well
+  
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+        'Content-Type': 'application/json',
+        'Accept': 'image/png',
       },
-      options: {
-        wait_for_model: true,
-        use_cache: true,
-      },
-    }),
-  })
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          ...parameters,
+          use_cache: true,
+        },
+        options: {
+          wait_for_model: true,
+          use_cache: true,
+        },
+      }),
+    })
 
-  if (!res.ok) {
-    let details: any = undefined
-    try {
-      details = await res.json()
-    } catch {
+    if (!res.ok) {
+      let details: any = undefined
       try {
-        details = await res.text()
-      } catch {}
+        details = await res.json()
+      } catch {
+        try {
+          details = await res.text()
+        } catch {
+          details = `HTTP ${res.status}`
+        }
+      }
+      const err: any = new Error(typeof details === 'string' ? details : (details?.error || `HF request failed: ${res.status}`))
+      err.status = res.status
+      err.response = { data: details }
+      throw err
     }
-    const err: any = new Error(typeof details === 'string' ? details : (details?.error || `HF request failed: ${res.status}`))
-    err.status = res.status
-    err.response = { data: details }
-    throw err
-  }
 
-  const arrayBuffer = await res.arrayBuffer()
-  const base64 = Buffer.from(arrayBuffer).toString('base64')
-  const dataUrl = `data:image/png;base64,${base64}`
-  return dataUrl
+    const arrayBuffer = await res.arrayBuffer()
+    if (arrayBuffer.byteLength === 0) {
+      throw new Error('Empty response from image generation API')
+    }
+    
+    const base64 = Buffer.from(arrayBuffer).toString('base64')
+    const dataUrl = `data:image/png;base64,${base64}`
+    return dataUrl
+  } catch (error) {
+    console.error('HF API Error:', error)
+    throw error
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const { prompt, imageUrl } = await request.json()
+    let body
+    try {
+      body = await request.json()
+    } catch (e) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid request',
+          details: 'Request body must be valid JSON'
+        },
+        { status: 400 }
+      )
+    }
+
+    const { prompt, imageUrl } = body
 
     if (!prompt && !imageUrl) {
       return NextResponse.json(
