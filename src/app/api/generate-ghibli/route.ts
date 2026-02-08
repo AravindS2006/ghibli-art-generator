@@ -22,7 +22,7 @@ const isCreditLimitError = (error: any) => {
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
-  const endpoint = `https://router.huggingface.co/models/${model}`
+  const endpoint = `https://router.huggingface.co/api/text-to-image`
   
   try {
     const res = await fetch(endpoint, {
@@ -30,16 +30,12 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
       headers: {
         'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
         'Content-Type': 'application/json',
-        'Accept': 'image/png',
       },
       body: JSON.stringify({
+        model: model,
         inputs: prompt,
         parameters: {
           ...parameters,
-          use_cache: true,
-        },
-        options: {
-          wait_for_model: true,
           use_cache: true,
         },
       }),
@@ -62,6 +58,20 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
       throw err
     }
 
+    const data = await res.json()
+    
+    // Router returns image as base64 in the response
+    if (data.image) {
+      // If it's already a data URL
+      if (data.image.startsWith('data:')) {
+        return data.image
+      }
+      // If it's base64, convert it
+      const base64 = typeof data.image === 'string' ? data.image : Buffer.from(data.image).toString('base64')
+      return `data:image/png;base64,${base64}`
+    }
+    
+    // Fallback: try to parse as image binary
     const arrayBuffer = await res.arrayBuffer()
     if (arrayBuffer.byteLength === 0) {
       throw new Error('Empty response from image generation API')
