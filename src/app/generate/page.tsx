@@ -305,8 +305,7 @@ export default function GeneratePage() {
             </motion.div>
           )}
         </div>
-      </div>
-    </div>
+      </>
       )}
     </div>
   )
