@@ -22,7 +22,7 @@ const isCreditLimitError = (error: any) => {
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
-  const endpoint = `https://api-inference.huggingface.co/models/${model}`
+  const endpoint = `https://router.huggingface.co/models/${model}`
   
   try {
     const res = await fetch(endpoint, {
