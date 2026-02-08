@@ -38,33 +38,75 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
   const customEndpoint = process.env.CUSTOM_INFERENCE_ENDPOINT || process.env.HF_CUSTOM_INFERENCE_ENDPOINT
   const customApiKey = process.env.CUSTOM_INFERENCE_API_KEY || process.env.HF_CUSTOM_INFERENCE_API_KEY
 
+  // Helper: parse response from custom endpoint into a data URL
+  async function parseImageResponse(res: Response) {
+    const ct = (res.headers.get('content-type') || '').toLowerCase()
+    if (ct.includes('application/json')) {
+      const json = await res.json()
+      if (json.image) {
+        if (typeof json.image === 'string' && json.image.startsWith('data:')) return json.image
+        if (typeof json.image === 'string') return `data:image/png;base64,${json.image}`
+      }
+      if (json.output_url) {
+        const out = await fetch(json.output_url)
+        const ab = await out.arrayBuffer()
+        return `data:image/png;base64,${Buffer.from(ab).toString('base64')}`
+      }
+      throw new Error('JSON response did not contain image or output_url')
+    }
+
+    if (ct.startsWith('image/')) {
+      const ab = await res.arrayBuffer()
+      return `data:${ct};base64,${Buffer.from(ab).toString('base64')}`
+    }
+
+    const ab = await res.arrayBuffer()
+    if (ab && ab.byteLength > 0) return `data:image/png;base64,${Buffer.from(ab).toString('base64')}`
+
+    throw new Error('Empty or unsupported response from custom inference endpoint')
+  }
+
+  async function callCustomInferenceEndpoint(endpoint: string, apiKey: string | undefined, promptText: string, params: Record<string, any>) {
+    const payload = { inputs: promptText, parameters: { ...params, use_cache: true } }
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    })
+
+    // queued response
+    if (res.status === 202) {
+      const pollUrl = res.headers.get('location') || res.headers.get('Location')
+      if (!pollUrl) throw new Error('Queued response received but no Location header to poll')
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        const pollRes = await fetch(pollUrl, { headers: { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) } })
+        if (pollRes.status === 200) return await parseImageResponse(pollRes)
+        if (pollRes.status >= 400 && pollRes.status !== 202) {
+          const txt = await pollRes.text().catch(() => '')
+          throw new Error(`Polling failed: ${pollRes.status} ${txt}`)
+        }
+      }
+      throw new Error('Timed out waiting for queued inference result')
+    }
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '')
+      throw new Error(`Custom inference failed: ${res.status} ${txt}`)
+    }
+
+    return await parseImageResponse(res)
+  }
+
   if (customEndpoint) {
     try {
-      const payload = { inputs: prompt, parameters: { ...parameters, use_cache: true } }
-      const res = await fetch(customEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(customApiKey ? { 'Authorization': `Bearer ${customApiKey}` } : {}),
-        },
-        body: JSON.stringify(payload),
-      })
-
-      if (res.ok) {
-        const ct = res.headers.get('content-type') || ''
-        if (ct.includes('application/json')) {
-          const data = await res.json()
-          if (data.image) return typeof data.image === 'string' && data.image.startsWith('data:') ? data.image : `data:image/png;base64,${data.image}`
-        } else {
-          const ab = await res.arrayBuffer()
-          if (ab.byteLength > 0) return `data:image/png;base64,${Buffer.from(ab).toString('base64')}`
-        }
-      } else {
-        const details = await res.text().catch(() => '')
-        console.warn('Custom inference endpoint failed:', res.status, details)
-      }
+      const dataUrl = await callCustomInferenceEndpoint(customEndpoint, customApiKey, prompt, parameters)
+      if (dataUrl) return dataUrl
     } catch (e: any) {
-      console.warn('Error calling custom inference endpoint:', e?.message || e)
+      console.warn('Custom inference endpoint failed:', e?.message || e)
     }
     // If custom endpoint fails, continue to router fallbacks below
   }
