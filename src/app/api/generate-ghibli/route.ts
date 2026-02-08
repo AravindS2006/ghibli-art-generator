@@ -22,68 +22,82 @@ const isCreditLimitError = (error: any) => {
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
-  const endpoint = `https://router.huggingface.co/api/text-to-image`
-  
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: model,
-        inputs: prompt,
-        parameters: {
-          ...parameters,
-          use_cache: true,
-        },
-      }),
-    })
+  // Try multiple endpoints: prefer router API, then model-specific endpoints as fallback
+  const encodedModel = encodeURIComponent(model)
+  const candidateEndpoints = [
+    // Preferred: router text-to-image endpoint (accepts `model` in body)
+    { url: `https://router.huggingface.co/api/text-to-image`, bodyIsModelField: true },
+    // Alternative router model-specific endpoint (URL-encoded)
+    { url: `https://router.huggingface.co/models/${encodedModel}`, bodyIsModelField: false },
+  ]
 
-    if (!res.ok) {
-      let details: any = undefined
-      try {
-        details = await res.json()
-      } catch {
-        try {
-          details = await res.text()
-        } catch {
-          details = `HTTP ${res.status}`
+  let lastError: any = null
+
+  for (const ep of candidateEndpoints) {
+    try {
+      const bodyPayload: any = ep.bodyIsModelField
+        ? { model, inputs: prompt, parameters: { ...parameters, use_cache: true } }
+        : { inputs: prompt, parameters: { ...parameters, use_cache: true }, options: { wait_for_model: true } }
+
+      const res = await fetch(ep.url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(bodyPayload),
+      })
+
+      if (!res.ok) {
+        let details: any = undefined
+        try { details = await res.text() } catch {}
+        const err: any = new Error(`HF request failed (${res.status}) ${details ? '- ' + details : ''}`)
+        err.status = res.status
+        err.response = { data: details, endpoint: ep.url }
+        // If 404, provide specific guidance
+        if (res.status === 404) {
+          err.hint = `Model not found or inaccessible at ${ep.url}. Ensure the model ID is correct and the model is available for inference (LoRA adapters may not be callable directly).`
+        }
+        throw err
+      }
+
+      // Some router endpoints return JSON with an `image` base64 field
+      const contentType = res.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        const data = await res.json()
+        if (data.image) {
+          const img = data.image
+          if (typeof img === 'string' && img.startsWith('data:')) return img
+          const base64 = typeof img === 'string' ? img : Buffer.from(img).toString('base64')
+          return `data:image/png;base64,${base64}`
+        }
+        // if JSON response doesn't include image, but includes binary array, try to handle
+        if (data && data.error) {
+          const err: any = new Error(data.error || JSON.stringify(data))
+          err.response = { data }
+          throw err
         }
       }
-      const err: any = new Error(typeof details === 'string' ? details : (details?.error || `HF request failed: ${res.status}`))
-      err.status = res.status
-      err.response = { data: details }
-      throw err
-    }
 
-    const data = await res.json()
-    
-    // Router returns image as base64 in the response
-    if (data.image) {
-      // If it's already a data URL
-      if (data.image.startsWith('data:')) {
-        return data.image
+      // fallback: handle binary response
+      const arrayBuffer = await res.arrayBuffer()
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Empty response from image generation API')
       }
-      // If it's base64, convert it
-      const base64 = typeof data.image === 'string' ? data.image : Buffer.from(data.image).toString('base64')
+      const base64 = Buffer.from(arrayBuffer).toString('base64')
       return `data:image/png;base64,${base64}`
+    } catch (err: any) {
+      lastError = err
+      console.warn(`HF endpoint ${ep.url} failed:`, err?.message || err)
+      // try next endpoint
+      continue
     }
-    
-    // Fallback: try to parse as image binary
-    const arrayBuffer = await res.arrayBuffer()
-    if (arrayBuffer.byteLength === 0) {
-      throw new Error('Empty response from image generation API')
-    }
-    
-    const base64 = Buffer.from(arrayBuffer).toString('base64')
-    const dataUrl = `data:image/png;base64,${base64}`
-    return dataUrl
-  } catch (error) {
-    console.error('HF API Error:', error)
-    throw error
   }
+
+  // All endpoints failed
+  console.error('All HF endpoints failed:', lastError)
+  throw lastError
 }
 
 export async function POST(request: Request) {
@@ -210,12 +224,33 @@ export async function POST(request: Request) {
         )
       }
 
+      // If HF returned 404, give actionable guidance (common with LoRA adapters)
+      if (error.status === 404) {
+        const isLikelyLoRA = /lora|lo_ra|-LoRA/i.test("strangerzonehf/Flux-Ghibli-Art-LoRA")
+        const hint = error.hint || (isLikelyLoRA
+          ? 'The requested model looks like a LoRA adapter which is not a standalone inference model. LoRA adapters cannot be called directly via the HF router. Use a base text-to-image model or deploy a custom endpoint that composes the adapter with a base model.'
+          : 'Model not found at Hugging Face router endpoint. Verify the model ID and that it is available for hosted inference.')
+
+        return NextResponse.json(
+          {
+            error: 'Model not found',
+            details: error.message || 'Model not found',
+            hint,
+            endpoint: error.response?.endpoint || null,
+            raw: error.response?.data || null,
+            warning: imageDescriptionWarning,
+          },
+          { status: 404 }
+        )
+      }
+
       // For other errors, return error details
       return NextResponse.json(
         { 
           error: 'Failed to generate image',
           details: error.message || 'An unknown error occurred during image generation',
-          warning: imageDescriptionWarning
+          warning: imageDescriptionWarning,
+          raw: error.response?.data || null,
         },
         { status: 500 }
       )
