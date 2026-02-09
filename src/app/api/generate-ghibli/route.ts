@@ -22,156 +22,36 @@ const isCreditLimitError = (error: any) => {
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
-  // Note: SDK-first attempt removed due to package export/typing differences.
-  // We will use the router fetch fallback below.
-
-  // Fallback: use router fetch endpoints
-  const encodedModel = encodeURIComponent(model)
-  const candidateEndpoints = [
-    { url: `https://router.huggingface.co/api/text-to-image`, bodyIsModelField: true },
-    { url: `https://router.huggingface.co/models/${encodedModel}`, bodyIsModelField: false },
-  ]
-
-  // If the repo/user provides a custom inference endpoint (e.g. a composed HF Inference Endpoint
-  // that applies the LoRA adapter to a base model), try it first. This is useful because
-  // LoRA adapters are not callable directly via the router; a composed endpoint is required.
-  const customEndpoint = process.env.CUSTOM_INFERENCE_ENDPOINT || process.env.HF_CUSTOM_INFERENCE_ENDPOINT
-  const customApiKey = process.env.CUSTOM_INFERENCE_API_KEY || process.env.HF_CUSTOM_INFERENCE_API_KEY
-
-  // Helper: parse response from custom endpoint into a data URL
-  async function parseImageResponse(res: Response) {
-    const ct = (res.headers.get('content-type') || '').toLowerCase()
-    if (ct.includes('application/json')) {
-      const json = await res.json()
-      if (json.image) {
-        if (typeof json.image === 'string' && json.image.startsWith('data:')) return json.image
-        if (typeof json.image === 'string') return `data:image/png;base64,${json.image}`
-      }
-      if (json.output_url) {
-        const out = await fetch(json.output_url)
-        const ab = await out.arrayBuffer()
-        return `data:image/png;base64,${Buffer.from(ab).toString('base64')}`
-      }
-      throw new Error('JSON response did not contain image or output_url')
-    }
-
-    if (ct.startsWith('image/')) {
-      const ab = await res.arrayBuffer()
-      return `data:${ct};base64,${Buffer.from(ab).toString('base64')}`
-    }
-
-    const ab = await res.arrayBuffer()
-    if (ab && ab.byteLength > 0) return `data:image/png;base64,${Buffer.from(ab).toString('base64')}`
-
-    throw new Error('Empty or unsupported response from custom inference endpoint')
-  }
-
-  async function callCustomInferenceEndpoint(endpoint: string, apiKey: string | undefined, promptText: string, params: Record<string, any>) {
-    const payload = { inputs: promptText, parameters: { ...params, use_cache: true } }
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify(payload),
+  try {
+    console.log(`Calling HF SDK for model: ${model}`)
+    const res = await client.textToImage({
+      model,
+      inputs: prompt,
+      parameters: parameters,
     })
 
-    // queued response
-    if (res.status === 202) {
-      const pollUrl = res.headers.get('location') || res.headers.get('Location')
-      if (!pollUrl) throw new Error('Queued response received but no Location header to poll')
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 1500))
-        const pollRes = await fetch(pollUrl, { headers: { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) } })
-        if (pollRes.status === 200) return await parseImageResponse(pollRes)
-        if (pollRes.status >= 400 && pollRes.status !== 202) {
-          const txt = await pollRes.text().catch(() => '')
-          throw new Error(`Polling failed: ${pollRes.status} ${txt}`)
-        }
-      }
-      throw new Error('Timed out waiting for queued inference result')
+    if (!res) throw new Error('No response from HF SDK')
+
+    // @ts-ignore - The SDK returns a Blob for textToImage
+    const blob = res as Blob
+    const arrayBuffer = await blob.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    const base64 = buffer.toString('base64')
+    return `data:${blob.type};base64,${base64}`
+
+  } catch (error: any) {
+    console.error('HF SDK Error:', error)
+
+    // Enrich error object for better frontend handling
+    if (error.message?.includes('404')) {
+      error.status = 404
+      error.hint = 'Model not found. It might be gated or the ID is incorrect.'
+    } else if (error.message?.includes('429')) {
+      error.status = 429
     }
 
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '')
-      throw new Error(`Custom inference failed: ${res.status} ${txt}`)
-    }
-
-    return await parseImageResponse(res)
+    throw error
   }
-
-  if (customEndpoint) {
-    try {
-      const dataUrl = await callCustomInferenceEndpoint(customEndpoint, customApiKey, prompt, parameters)
-      if (dataUrl) return dataUrl
-    } catch (e: any) {
-      console.warn('Custom inference endpoint failed:', e?.message || e)
-    }
-    // If custom endpoint fails, continue to router fallbacks below
-  }
-
-  let lastError: any = null
-
-  for (const ep of candidateEndpoints) {
-    try {
-      const bodyPayload: any = ep.bodyIsModelField
-        ? { model, inputs: prompt, parameters: { ...parameters, use_cache: true } }
-        : { inputs: prompt, parameters: { ...parameters, use_cache: true }, options: { wait_for_model: true } }
-
-      const res = await fetch(ep.url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(bodyPayload),
-      })
-
-      if (!res.ok) {
-        let details: any = undefined
-        try { details = await res.text() } catch { }
-        const err: any = new Error(`HF request failed (${res.status}) ${details ? '- ' + details : ''}`)
-        err.status = res.status
-        err.response = { data: details, endpoint: ep.url }
-        if (res.status === 404) {
-          err.hint = `Model not found or inaccessible at ${ep.url}. Ensure the model ID is correct and the model is available for inference (LoRA adapters may not be callable directly).`
-        }
-        throw err
-      }
-
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('application/json')) {
-        const data = await res.json()
-        if (data.image) {
-          const img = data.image
-          if (typeof img === 'string' && img.startsWith('data:')) return img
-          const base64 = typeof img === 'string' ? img : Buffer.from(img).toString('base64')
-          return `data:image/png;base64,${base64}`
-        }
-        if (data && data.error) {
-          const err: any = new Error(data.error || JSON.stringify(data))
-          err.response = { data }
-          throw err
-        }
-      }
-
-      const arrayBuffer = await res.arrayBuffer()
-      if (arrayBuffer.byteLength === 0) {
-        throw new Error('Empty response from image generation API')
-      }
-      const base64 = Buffer.from(arrayBuffer).toString('base64')
-      return `data:image/png;base64,${base64}`
-    } catch (err: any) {
-      lastError = err
-      console.warn(`HF endpoint ${ep.url} failed:`, err?.message || err)
-      continue
-    }
-  }
-
-  console.error('All HF endpoints failed:', lastError)
-  throw lastError
 }
 
 export async function POST(request: Request) {
