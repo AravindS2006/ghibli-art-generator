@@ -13,12 +13,12 @@ const client = new HfInference(process.env.HUGGINGFACE_API_KEY)
 // Helper function to check if error is due to credit limit
 const isCreditLimitError = (error: any) => {
   const errorMsg = (error.message || '').toLowerCase()
-  return errorMsg.includes('monthly included credits') || 
-         error.status === 429 ||
-         errorMsg.includes('rate limit') ||
-         errorMsg.includes('quota exceeded') ||
-         errorMsg.includes('insufficient credit') ||
-         errorMsg.includes('model is overloaded')
+  return errorMsg.includes('monthly included credits') ||
+    error.status === 429 ||
+    errorMsg.includes('rate limit') ||
+    errorMsg.includes('quota exceeded') ||
+    errorMsg.includes('insufficient credit') ||
+    errorMsg.includes('model is overloaded')
 }
 
 async function generateImageViaHF(model: string, prompt: string, parameters: Record<string, any>) {
@@ -131,7 +131,7 @@ async function generateImageViaHF(model: string, prompt: string, parameters: Rec
 
       if (!res.ok) {
         let details: any = undefined
-        try { details = await res.text() } catch {}
+        try { details = await res.text() } catch { }
         const err: any = new Error(`HF request failed (${res.status}) ${details ? '- ' + details : ''}`)
         err.status = res.status
         err.response = { data: details, endpoint: ep.url }
@@ -181,7 +181,7 @@ export async function POST(request: Request) {
       body = await request.json()
     } catch (e) {
       return NextResponse.json(
-        { 
+        {
           error: 'Invalid request',
           details: 'Request body must be valid JSON'
         },
@@ -236,9 +236,9 @@ export async function POST(request: Request) {
           })
 
           console.log('Image description:', imageDescription.choices[0].message)
-          
+
           // Combine the image description with the prompt if provided
-          finalPrompt = prompt 
+          finalPrompt = prompt
             ? `${prompt} ${imageDescription.choices[0].message.content}`
             : imageDescription.choices[0].message.content
         } catch (error: any) {
@@ -247,7 +247,7 @@ export async function POST(request: Request) {
             status: error.status,
             response: error.response?.data
           })
-          
+
           // If image description fails due to credit limit, set warning and continue with original prompt
           if (isCreditLimitError(error)) {
             imageDescriptionWarning = 'Image description feature is currently unavailable due to API limits. Proceeding with text prompt only.'
@@ -260,19 +260,22 @@ export async function POST(request: Request) {
       }
     }
 
-    // Generate the Ghibli-style image (direct API call to avoid Blob fetch issues)
+    // Generate the Ghibli-style image using FLUX.1-schnell (faster, reliable)
     try {
-      console.log('Generating image with prompt:', finalPrompt)
+      // Enhance prompt for Ghibli style since we are using a base model
+      const stylePrompt = "Studio Ghibli style, anime art style, vibrant colors, detailed background, Hayao Miyazaki style, " + finalPrompt
+      console.log('Generating image with prompt:', stylePrompt)
+
       const dataUrl = await generateImageViaHF(
-        "strangerzonehf/Flux-Ghibli-Art-LoRA",
-        finalPrompt,
+        "black-forest-labs/FLUX.1-schnell",
+        stylePrompt,
         {
-          num_inference_steps: parseInt(process.env.NEXT_PUBLIC_NUM_INFERENCE_STEPS || '20'),
-          guidance_scale: 7.5,
+          num_inference_steps: 4, // Schnell is optimized for few steps
+          guidance_scale: 0.0, // Schnell usually doesn't need guidance or uses 0 (or ignored)
         }
       )
 
-      return NextResponse.json({ 
+      return NextResponse.json({
         image: dataUrl,
         description: finalPrompt,
         warning: imageDescriptionWarning
@@ -288,7 +291,7 @@ export async function POST(request: Request) {
       // If it's a credit limit error, return specific error
       if (isCreditLimitError(error)) {
         return NextResponse.json(
-          { 
+          {
             error: 'API credit limit reached',
             details: 'The image generation service is currently unavailable due to API limits. Please try again later or upgrade your plan.',
             warning: imageDescriptionWarning,
@@ -345,7 +348,7 @@ export async function POST(request: Request) {
 
       // For other errors, return error details
       return NextResponse.json(
-        { 
+        {
           error: 'Failed to generate image',
           details: error.message || 'An unknown error occurred during image generation',
           warning: imageDescriptionWarning,
@@ -364,7 +367,7 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to process request',
         details: error?.message || 'An unknown error occurred'
       },
