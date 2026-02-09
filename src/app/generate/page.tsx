@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Button, Input, Card, CardBody, Image } from '@nextui-org/react'
 import { useDropzone } from 'react-dropzone'
@@ -42,6 +42,8 @@ const useStore = create<AppState>((set) => ({
 }))
 
 export default function GeneratePage() {
+  const [mounted, setMounted] = useState(false)
+
   const {
     prompt,
     uploadedImage,
@@ -58,6 +60,11 @@ export default function GeneratePage() {
     setWarning,
     setRetryAfter,
   } = useStore()
+
+  // Ensure client-side only rendering to avoid hydration issues
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -93,16 +100,48 @@ export default function GeneratePage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           prompt,
           imageUrl: uploadedImage
         }),
       })
 
-      const data = await response.json()
+      // Safely handle JSON and non-JSON (HTML) responses to avoid 'Unexpected token <' errors
+      const contentType = response.headers.get('content-type') || ''
+      let data: any = null
+      let rawText: string | null = null
+
+      if (contentType.includes('application/json')) {
+        data = await response.json()
+      } else {
+        rawText = await response.text()
+        try {
+          data = JSON.parse(rawText)
+        } catch (e) {
+          // If server returned HTML/error page, throw a meaningful error
+          throw new Error(`Server returned non-JSON response: ${rawText.slice(0, 200)}`)
+        }
+      }
 
       if (!response.ok) {
-        throw new Error(data.details || data.error || 'Failed to generate image')
+        // If model is not found on HF router, show a friendly placeholder image
+        const isModelNotFound = response.status === 404 || /model not found/i.test(data?.error || data?.details || '')
+        if (isModelNotFound) {
+          const placeholderSvg = encodeURIComponent(`
+              <svg xmlns='http://www.w3.org/2000/svg' width='1024' height='1024' viewBox='0 0 1024 1024'>
+                <rect width='100%' height='100%' fill='#0f172a' />
+                <text x='50%' y='45%' fill='#a78bfa' font-size='48' font-family='Arial' text-anchor='middle'>Model unavailable</text>
+                <text x='50%' y='55%' fill='#fef3c7' font-size='28' font-family='Arial' text-anchor='middle'>Showing placeholder image</text>
+              </svg>
+            `)
+          const placeholderDataUrl = `data:image/svg+xml;utf8,${placeholderSvg}`
+          setGeneratedImage(placeholderDataUrl)
+          setWarning(data?.hint || 'Selected model is not available for hosted inference. Try a different model or use a hosted endpoint.')
+          setError(null)
+          return
+        }
+
+        throw new Error(data?.details || data?.error || 'Failed to generate image')
       }
 
       setGeneratedImage(data.image)
@@ -129,170 +168,177 @@ export default function GeneratePage() {
 
   return (
     <div className="min-h-screen py-20">
-      <div className="container mx-auto px-4">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-center mb-12"
-        >
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            Create Your{' '}
-            <span className="bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent">
-              Ghibli Masterpiece
-            </span>
-          </h1>
-          <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-            Transform your imagination into stunning Studio Ghibli-style artwork using AI.
-          </p>
-        </motion.div>
-
-        <div className="max-w-4xl mx-auto">
-          <Card className="bg-white/5 backdrop-blur-lg border border-white/10">
-            <CardBody className="space-y-6 p-8">
-              <Input
-                label="Describe your Ghibli-style scene"
-                placeholder="A girl sitting under a large tree reading a book, summer day"
-                value={prompt}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPrompt(e.target.value)}
-                className="w-full"
-                classNames={{
-                  label: "text-white",
-                  input: "text-white",
-                  inputWrapper: "bg-white/5 border-white/10 hover:bg-white/10",
-                }}
-              />
-
-              {/* Image Upload */}
-              <div
-                {...getRootProps()}
-                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
-                  ${isDragActive ? 'border-purple-500 bg-purple-500/10' : 'border-white/20 hover:border-purple-500'}`}
-              >
-                <input {...getInputProps()} />
-                {uploadedImage ? (
-                  <div className="relative">
-                    <Image
-                      src={uploadedImage}
-                      alt="Uploaded preview"
-                      className="max-h-48 mx-auto rounded-lg"
-                    />
-                    <Button
-                      color="danger"
-                      variant="flat"
-                      className="absolute top-2 right-2"
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation()
-                        setUploadedImage(null)
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-gray-400">
-                      {isDragActive
-                        ? 'Drop the image here'
-                        : 'Drag & drop an image here, or click to select'}
-                    </p>
-                    <p className="text-sm text-yellow-500">
-                      ⚠️ Reference image feature is currently under testing so it may not work as expected. use at your own risk.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Generate Button */}
-              <Button
-                color="primary"
-                size="lg"
-                className="w-full"
-                onClick={handleGenerate}
-                isLoading={isLoading}
-                disabled={isLoading || (!prompt && !uploadedImage)}
-              >
-                Create Ghibli Magic ✨
-              </Button>
-
-              {warning && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-yellow-500 text-center"
-                >
-                  {warning}
-                </motion.div>
-              )}
-
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-red-500 text-center space-y-2"
-                >
-                  <p>{error}</p>
-                  {retryAfter && (
-                    <p className="text-sm">
-                      Please try again in {formatRetryTime(retryAfter)}
-                    </p>
-                  )}
-                </motion.div>
-              )}
-            </CardBody>
-          </Card>
-
-          {/* Results Section */}
-          {(uploadedImage || generatedImage) && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-            >
-              <Card className="mt-8 bg-white/5 backdrop-blur-lg border border-white/10">
-                <CardBody className="p-8">
-                  <h2 className="text-2xl font-semibold mb-6 text-white">Your Creation</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    {uploadedImage && (
-                      <div>
-                        <h3 className="text-lg font-medium mb-4 text-white">Original Image</h3>
-                        <Image
-                          src={uploadedImage}
-                          alt="Original"
-                          className="rounded-lg"
-                        />
-                      </div>
-                    )}
-                    {generatedImage && (
-                      <div>
-                        <h3 className="text-lg font-medium mb-4 text-white">Ghibli Style</h3>
-                        <Image
-                          src={generatedImage}
-                          alt="Generated"
-                          className="rounded-lg"
-                        />
-                        <Button
-                          color="primary"
-                          variant="flat"
-                          className="mt-4 w-full"
-                          onClick={() => {
-                            const link = document.createElement('a')
-                            link.href = generatedImage
-                            link.download = 'ghibli-art.png'
-                            link.click()
-                          }}
-                        >
-                          Download Image
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CardBody>
-              </Card>
-            </motion.div>
-          )}
+      {!mounted ? (
+        <div className="container mx-auto px-4">
+          <div className="max-w-4xl mx-auto h-96 bg-white/5 rounded-lg animate-pulse" />
         </div>
-      </div>
+      ) : (
+        <div className="container mx-auto px-4">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+            className="text-center mb-12"
+          >
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
+              Create Your{' '}
+              <span className="bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent">
+                Ghibli Masterpiece
+              </span>
+            </h1>
+            <p className="text-xl text-gray-300 max-w-2xl mx-auto">
+              Transform your imagination into stunning Studio Ghibli-style artwork using AI.
+            </p>
+          </motion.div>
+
+          <div className="max-w-4xl mx-auto">
+            <Card className="bg-white/5 backdrop-blur-lg border border-white/10">
+              <CardBody className="space-y-6 p-8">
+                <Input
+                  label="Describe your Ghibli-style scene"
+                  placeholder="A girl sitting under a large tree reading a book, summer day"
+                  value={prompt}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPrompt(e.target.value)}
+                  className="w-full"
+                  classNames={{
+                    label: "!text-white font-medium",
+                    input: "!text-white placeholder:text-zinc-500",
+                    inputWrapper: "bg-zinc-900/80 border-zinc-700 data-[hover=true]:bg-zinc-800 group-data-[focus=true]:bg-zinc-800",
+                    innerWrapper: "bg-transparent",
+                  }}
+                />
+
+                {/* Image Upload */}
+                <div
+                  {...getRootProps()}
+                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors
+                  ${isDragActive ? 'border-purple-500 bg-purple-500/10' : 'border-white/20 hover:border-purple-500'}`}
+                >
+                  <input {...getInputProps()} />
+                  {uploadedImage ? (
+                    <div className="relative">
+                      <Image
+                        src={uploadedImage}
+                        alt="Uploaded preview"
+                        className="max-h-48 mx-auto rounded-lg"
+                      />
+                      <Button
+                        color="danger"
+                        variant="flat"
+                        className="absolute top-2 right-2"
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation()
+                          setUploadedImage(null)
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-gray-400">
+                        {isDragActive
+                          ? 'Drop the image here'
+                          : 'Drag & drop an image here, or click to select'}
+                      </p>
+                      <p className="text-sm text-yellow-500">
+                        ⚠️ Reference image feature is currently under testing so it may not work as expected. use at your own risk.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Generate Button */}
+                <Button
+                  color="primary"
+                  size="lg"
+                  className="w-full"
+                  onClick={handleGenerate}
+                  isLoading={isLoading}
+                  disabled={isLoading || (!prompt && !uploadedImage)}
+                >
+                  Create Ghibli Magic ✨
+                </Button>
+
+                {warning && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-yellow-500 text-center"
+                  >
+                    {warning}
+                  </motion.div>
+                )}
+
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-red-500 text-center space-y-2"
+                  >
+                    <p>{error}</p>
+                    {retryAfter && (
+                      <p className="text-sm">
+                        Please try again in {formatRetryTime(retryAfter)}
+                      </p>
+                    )}
+                  </motion.div>
+                )}
+              </CardBody>
+            </Card>
+
+            {/* Results Section */}
+            {(uploadedImage || generatedImage) && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+              >
+                <Card className="mt-8 bg-white/5 backdrop-blur-lg border border-white/10">
+                  <CardBody className="p-8">
+                    <h2 className="text-2xl font-semibold mb-6 text-white">Your Creation</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {uploadedImage && (
+                        <div>
+                          <h3 className="text-lg font-medium mb-4 text-white">Original Image</h3>
+                          <Image
+                            src={uploadedImage}
+                            alt="Original"
+                            className="rounded-lg"
+                          />
+                        </div>
+                      )}
+                      {generatedImage && (
+                        <div>
+                          <h3 className="text-lg font-medium mb-4 text-white">Ghibli Style</h3>
+                          <Image
+                            src={generatedImage}
+                            alt="Generated"
+                            className="rounded-lg"
+                          />
+                          <Button
+                            color="primary"
+                            variant="flat"
+                            className="mt-4 w-full"
+                            onClick={() => {
+                              const link = document.createElement('a')
+                              link.href = generatedImage
+                              link.download = 'ghibli-art.png'
+                              link.click()
+                            }}
+                          >
+                            Download Image
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </CardBody>
+                </Card>
+              </motion.div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 } 

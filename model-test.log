@@ -1,0 +1,10 @@
+
+--- Testing vision Model: google/gemma-3-27b-it ---
+Success! Response: Here's a description of the image:
+
+**Subject:** The image features a close-up of a kitten.
+
+**Appearance:** The kitten has a tabby coat with a pattern of dark brown and black stripes on a lighter brown/tan background. It has large, round, golden eyes that are looking directly at the viewer. The kitten's ears are large and pointed, with some reddish tones inside. There are some white markings around its nose and mouth area giving it a slightly unusual expression
+
+--- Testing vision Model: Qwen/Qwen2-VL-7B-Instruct ---
+Failed: Failed to perform inference: [object Object]
