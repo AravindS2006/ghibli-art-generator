@@ -61,7 +61,8 @@ async function testModel(modelId: string, type: 'vision' | 'image') {
 
             // response is a Blob
             if (response) {
-                log(`Success! Received Blob of size: ${response.size} type: ${response.type}`)
+                const blob = response as unknown as Blob
+                log(`Success! Received Blob of size: ${blob.size} type: ${blob.type}`)
             } else {
                 log(`Failed: No response received`)
             }
