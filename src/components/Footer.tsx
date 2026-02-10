@@ -28,7 +28,7 @@ export default function Footer() {
   const socialLinks = [
     { name: 'Twitter', href: 'https://twitter.com/Aravinds2006', icon: '𝕏' },
     { name: 'GitHub', href: 'https://github.com/Aravinds2006', icon: 'Github' },
-    { name: 'Instagram', href: 'https://instagram.com/nova__trades', icon: 'Instagram' },
+    { name: 'Instagram', href: 'https://instagram.com/aravind__fx_', icon: 'Instagram' },
   ]
 
   return (
